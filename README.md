@@ -2,8 +2,8 @@
 Inspired by the hit game Meccha Chameleon, which I have not played but have perfectly experienced through brainrot YouTube Shorts, this is an avatar you can draw on to disguise yourself!
 
 # General Usage
-**Posing**: Open the action wheel to view available poses. These are synced.
-**Nameplate/Shadow**: Stand still and your shadow + nameplate will disappear.
+- **Posing**: Open the action wheel to view available poses. These are synced.
+- **Nameplate/Shadow**: Stand still and your shadow + nameplate will disappear.
 
 # Editing
 - Press **Tab** to open edit mode. In this mode your cursor is unlocked. See available keybinds on the right of your hotbar.
