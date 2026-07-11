@@ -1,11 +1,12 @@
+local MAX_SHOTS = 5
+local SHOT_RECHARGE_TICKS = 60
+local PING_LIMIT = 400
+
 vanilla_model.PLAYER:visible(false)
 
 models.model
     :setPrimaryRenderType("CUTOUT_EMISSIVE_SOLID")
     :setSecondaryRenderType("CUTOUT_EMISSIVE_SOLID")
-    :scale(0.75)
-
-nameplate.ENTITY:pivot(0, 1.8, 0)
 
 local TEXTURE = textures["model.Skin"]
 
@@ -22,7 +23,6 @@ function pings.receive_texture_data(start, final_size, data)
 end
 
 local BLEND_TIME = 3
-
 local blend_out = {}
 local blend_in = {}
 local last = nil
@@ -89,8 +89,10 @@ function events.RENDER(delta)
     nameplate.ENTITY:setScale(limb_influence ^ 2)
 end
 
+local is_seeker = true
+
 function events.TICK()
-    if player:getVelocity():length() < 0.05 then
+    if player:getVelocity():length() < 0.05 and not is_seeker then
         statue_timer = statue_timer + 1
     else
         statue_timer = 0
@@ -100,6 +102,19 @@ function events.TICK()
     influence = math.lerp(influence, statue_timer > 5 and 0 or 1, 0.4)
 end
 
+local function set_user_type(seeker)
+    is_seeker = seeker
+    avatar:store("is_seeker", seeker)
+    models.model:scale(seeker and 1 or 0.75)
+    nameplate.ENTITY:pivot(0, seeker and 2.2 or 1.8, 0)
+end
+
+function pings.set_user_type(seeker)
+    set_user_type(seeker)
+end
+
+set_user_type(true)
+avatar:store("chameleon_player", true)
 if not host:isHost() then return end
 
 local PARTS = {
@@ -308,6 +323,8 @@ local camrot = vec(0, 0, 0)
 local EDIT = keybinds:of("edit mode", "key.keyboard.tab", true)
 
 function EDIT:press()
+    if host:isChatOpen() then return end
+    if host:getScreen() then return end
     editing = not editing
     host:setUnlockCursor(editing)
     if editing then
@@ -353,9 +370,22 @@ function events.TICK()
         :pos(client.getScaledWindowSize():mul(-0.5, -1):add(-94, client.getTextHeight(hud_text) + 2).xy_)
         :outline(true)
         :background(true)
+        local n_hiders = 0
+        for name, entity in next, world.getPlayers() do
+            if entity:getVariable("chameleon_player") and not entity:getVariable("is_seeker") then
+                n_hiders = n_hiders + 1
+            end
+        end
+        local seeker_text = ("§a%i §7%s\n"):format(n_hiders, n_hiders == 1 and "hider remains" or "hiders remain")
+        HUD:newText("seeker")
+            :text(seeker_text)
+            :outline(true)
+            :scale(2)
+            :alignment("CENTER")
+            :pos(client.getScaledWindowSize():mul(-0.5, 0):add(0, -48, 0).xy_)
+    end
 end
 
-local PING_LIMIT = 400
 local to_send = ""
 local to_send_size = 0
 function events.TICK()
@@ -549,13 +579,28 @@ end
 local page = action_wheel:newPage("animations")
 action_wheel:setPage(page)
 
+local switch_action = page:newAction()
+local function switch_user_type(seeker)
+    pings.set_user_type(seeker)
+    renderer:cameraPivot():cameraRot()
+    spectating_player = nil
+    switch_action
+        :title(("You are a: %s"):format(seeker and "§cSeeker" or "§aHider"))
+        :onToggle(switch_user_type)
+        :color(vec(0, 1, 0))
+        :toggleColor(vec(1, 0, 0))
+        :setItem(seeker and "diamond_sword" or "shield")
+        :setToggled(seeker)
+end
+
+switch_user_type(true)
+
 local fetch_poses = {}
 local poses = {}
 
 local anims = animations:getAnimations()
 for i = 1, #anims do
     local anim = anims[i]
-
     local item_str = ("player_head" .. toJson {
         SkullOwner = {
             Id = {
