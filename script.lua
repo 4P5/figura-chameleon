@@ -424,6 +424,31 @@ function events.TICK()
     end
 end
 
+local CHANGE_PERSPECTIVE = keybinds:of("change perspective", "key.keyboard.space", true)
+
+local spectating_player = nil
+local active_perspective = 1
+function CHANGE_PERSPECTIVE:press()
+    if is_seeker then return end
+    if not editing and statue_timer <= 10 then return end
+
+    local perspectives = { player }
+    for name, entity in next, world.getPlayers() do
+        if entity ~= player and entity:getVariable("chameleon_player") then
+            perspectives[#perspectives + 1] = entity
+        end
+    end
+
+    active_perspective = (active_perspective % #perspectives) + 1
+    spectating_player = perspectives[active_perspective]
+
+    if spectating_player == player then
+        renderer:cameraRot()
+    end
+
+    return true
+end
+
 local HUD = models:newPart("hud", "HUD")
 
 function events.TICK()
@@ -440,8 +465,14 @@ function events.TICK()
         hud_text = hud_text .. "\n§a[" .. PICK:getKeyName():lower() .. "] §rpick colour"
         hud_text = hud_text .. "\n§a[scroll] §rbrush size"
         hud_text = hud_text .. "\n§a[" .. SMOOTH_BRUSH:getKeyName():lower() .. "] §rsmooth brush"
+        if not is_seeker then
+            hud_text = hud_text .. "\n§a[" .. CHANGE_PERSPECTIVE:getKeyName():lower() .. "] §rchange perspective"
+        end
         hud_text = hud_text .. "\n§a[" .. EDIT:getKeyName():lower() .. "] §rexit edit mode"
     else
+        if statue_timer > 10 and not is_seeker then
+            hud_text = hud_text .. "§a[" .. CHANGE_PERSPECTIVE:getKeyName():lower() .. "] §rchange perspective\n"
+        end
         if is_seeker then
             if is_aiming then
                 hud_text = hud_text .. "§a[" .. FIRE_GUN:getKeyName():lower() .. "] §rfire gun\n"
@@ -457,6 +488,18 @@ function events.TICK()
         :pos(client.getScaledWindowSize():mul(-0.5, -1):add(-94, client.getTextHeight(hud_text) + 2).xy_)
         :outline(true)
         :background(true)
+
+    if spectating_player and spectating_player ~= player then
+        local player_is_seeker = spectating_player:getVariable("is_seeker")
+        HUD:newText("spectating")
+            :text("Spectating " .. (player_is_seeker and "§c" or "§a") .. spectating_player:getName())
+            :outline(true)
+            :scale(2)
+            :alignment("CENTER")
+            :pos(client.getScaledWindowSize():mul(-0.5, 0):add(0, -48, 0).xy_)
+    end
+
+    if is_seeker then
         local n_hiders = 0
         for name, entity in next, world.getPlayers() do
             if entity:getVariable("chameleon_player") and not entity:getVariable("is_seeker") then
@@ -504,15 +547,30 @@ function events.POST_WORLD_RENDER()
     brush_colour = vectors.rgbToHSV(screenshot:getPixel((client.getMousePos()):unpack()).xyz)
 end
 
+function events.WORLD_RENDER(delta)
+    if spectating_player and spectating_player ~= player and not is_seeker then
+        renderer:setCameraPivot(spectating_player:getPos(delta) + vec(0, 1.6, 0))
+        if not editing then
+            renderer:setCameraRot(spectating_player:getRot(delta).xy_)
+        end
+    else
+        renderer:setCameraPivot()
+    end
+end
+
 local particle_pos = {}
 function events.RENDER(delta)
     if editing then
         renderer:setCameraRot(camrot + rotate_view)
     else
-        if edit_out > 0.001 then
-            renderer:setCameraRot(camrot + rotate_view * math.lerp(_edit_out, edit_out, delta))
+        if (not spectating_player) or spectating_player == player then
+            if edit_out > 0.001 then
+                renderer:setCameraRot(camrot + rotate_view * math.lerp(_edit_out, edit_out, delta))
+            elseif rotate_view:length() > 0.001 then
+                renderer:setCameraRot()
+                rotate_view = vec(0, 0, 0)
+            end
         else
-            renderer:setCameraRot()
             rotate_view = vec(0, 0, 0)
         end
     end
