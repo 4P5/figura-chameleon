@@ -1,5 +1,5 @@
 local MAX_SHOTS = 5
-local SHOT_RECHARGE_TICKS = 60
+local SHOT_RECHARGE_TICKS = 40
 local PING_LIMIT = 400
 
 vanilla_model.PLAYER:visible(false)
@@ -8,7 +8,7 @@ models.model
     :setPrimaryRenderType("CUTOUT_EMISSIVE_SOLID")
     :setSecondaryRenderType("CUTOUT_EMISSIVE_SOLID")
 
-local TEXTURE = textures["model.Skin"]
+local TEXTURE = textures["model.Skin"] --[[@as Texture]]
 
 local receiving = ""
 function pings.receive_texture_data(start, final_size, data)
@@ -385,12 +385,14 @@ local shots = MAX_SHOTS
 local AIM_GUN = keybinds:of("aim gun", "key.mouse.right", false)
 function AIM_GUN:press()
     if not is_seeker then return end
+    if editing then return end
     pings.aim_gun(true)
     return true
 end
 
 function AIM_GUN:release()
     if not is_seeker then return end
+    if editing then return end
     pings.aim_gun(false)
     return true
 end
@@ -399,6 +401,7 @@ local FIRE_GUN = keybinds:of("fire gun", "key.mouse.left", false)
 function FIRE_GUN:press()
     if not is_seeker then return end
     if not is_aiming then return end
+    if editing then return end
     if shots > 0 then
         shots = shots - 1
         pings.fire_gun(client.getCameraPos(), client.getCameraDir())
@@ -499,14 +502,20 @@ function events.TICK()
             :pos(client.getScaledWindowSize():mul(-0.5, 0):add(0, -48, 0).xy_)
     end
 
-    if is_seeker then
-        local n_hiders = 0
-        for name, entity in next, world.getPlayers() do
-            if entity:getVariable("chameleon_player") and not entity:getVariable("is_seeker") then
+    local n_hiders = 0
+    local n_seekers = 0
+    for name, entity in next, world.getPlayers() do
+        if entity:getVariable("chameleon_player") then
+            if entity:getVariable("is_seeker") then
+                n_seekers = n_seekers + 1
+            else
                 n_hiders = n_hiders + 1
             end
         end
-        local seeker_text = ("§a%i §7%s\n"):format(n_hiders, n_hiders == 1 and "hider remains" or "hiders remain")
+    end
+    if is_seeker then
+        local seeker_text = ("§7You are a §cSeeker\n§a%i §7%s\n"):format(n_hiders,
+            n_hiders == 1 and "hider remains" or "hiders remain")
         for i = 1, MAX_SHOTS do
             if i > shots then
                 seeker_text = seeker_text .. " §7:spinner_dark: "
@@ -516,6 +525,17 @@ function events.TICK()
         end
         HUD:newText("seeker")
             :text(seeker_text)
+            :outline(true)
+            :scale(2)
+            :alignment("CENTER")
+            :pos(client.getScaledWindowSize():mul(-0.5, 0):add(0, -48, 0).xy_)
+    else
+        local hider_text = ("§7You are a §aHider\n§a%i §7%s · §c%i §7%s\n"):format(
+            n_hiders, n_hiders == 1 and "hider" or "hiders",
+            n_seekers, n_seekers == 1 and "seeker" or "seekers"
+        )
+        HUD:newText("hider")
+            :text(hider_text)
             :outline(true)
             :scale(2)
             :alignment("CENTER")
