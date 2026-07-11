@@ -71,6 +71,8 @@ end
 local statue_timer = 0
 local _influence = 0
 local influence = 0
+local _arm_lerp = 0
+local arm_lerp = 0
 
 vanilla_model.LEFT_ARM:setRot(vec(0, 0, 0))
 vanilla_model.RIGHT_ARM:setRot(vec(0, 0, 0))
@@ -79,9 +81,10 @@ vanilla_model.RIGHT_LEG:setRot(vec(0, 0, 0))
 
 function events.RENDER(delta)
     local limb_influence = math.lerp(_influence, influence, delta)
+    local aim_lerp = 1 - math.lerp(_arm_lerp, arm_lerp, delta)
 
     models.model.root.LeftArm:setRot(vanilla_model.LEFT_ARM:getOriginRot() * limb_influence)
-    models.model.root.RightArm:setRot(vanilla_model.RIGHT_ARM:getOriginRot() * limb_influence)
+    models.model.root.RightArm:setRot(vanilla_model.RIGHT_ARM:getOriginRot() * limb_influence * aim_lerp)
     models.model.root.LeftLeg:setRot(vanilla_model.LEFT_LEG:getOriginRot() * limb_influence)
     models.model.root.RightLeg:setRot(vanilla_model.RIGHT_LEG:getOriginRot() * limb_influence)
 
@@ -115,6 +118,40 @@ end
 
 set_user_type(true)
 avatar:store("chameleon_player", true)
+
+local is_aiming = false
+function pings.aim_gun(aiming)
+    is_aiming = aiming
+end
+
+function pings.fire_gun(pos, dir)
+    local viewer = client.getViewer()
+    if viewer ~= player and viewer:getVariable("chameleon_player") then
+        viewer:getVariable("chameleon_hit")(pos, dir)
+    end
+    sounds["block.respawn_anchor.deplete"]:pos(pos):pitch(2 + math.random() * 0.5):volume(0.4):subtitle("Seeker shoots")
+        :play()
+    local hit, hit_pos = raycast:block(pos, pos + dir * 100)
+    for i = 1, 50 do
+        local p = math.lerp(models.model.root.RightArm:partToWorldMatrix():apply(0, -12, 0),
+            hit_pos or pos + dir * math.random() * 100, math.random())
+        local vel = vec((math.random() - 0.5) * 0.1, (math.random() + 0.5) * 0.1, (math.random() - 0.5) * 0.1)
+        particles["item white_concrete"]
+            :pos(p):color(vectors.hsvToRGB(math.random(), 1, 1):augmented(1))
+            :scale(0.07 + math.random() * 0.07):gravity(0.5):physics(true):velocity(vel + dir * math.random() * 0.2)
+            :spawn()
+    end
+end
+
+function events.TICK()
+    _arm_lerp = arm_lerp
+    arm_lerp = math.lerp(arm_lerp, is_aiming and 1 or 0, 0.5)
+end
+
+function events.RENDER(delta)
+    models.model.root.RightArm:offsetRot(math.lerp(_arm_lerp, arm_lerp, delta) * 90, 0, 0)
+end
+
 if not host:isHost() then return end
 
 local PARTS = {
@@ -343,6 +380,50 @@ function events.MOUSE_MOVE(x, y)
     end
 end
 
+local shots = MAX_SHOTS
+
+local AIM_GUN = keybinds:of("aim gun", "key.mouse.right", false)
+function AIM_GUN:press()
+    if not is_seeker then return end
+    pings.aim_gun(true)
+    return true
+end
+
+function AIM_GUN:release()
+    if not is_seeker then return end
+    pings.aim_gun(false)
+    return true
+end
+
+local FIRE_GUN = keybinds:of("fire gun", "key.mouse.left", false)
+function FIRE_GUN:press()
+    if not is_seeker then return end
+    if not is_aiming then return end
+    if shots > 0 then
+        shots = shots - 1
+        pings.fire_gun(client.getCameraPos(), client.getCameraDir())
+    else
+        sounds["block.note_block.bass"]:pos(client.getCameraPos()):volume(0.5):pitch(0.3):subtitle(
+            "Out of ammo")
+            :play()
+    end
+    host:swingArm()
+    return true
+end
+
+local charge_shot = 0
+function events.TICK()
+    if shots < MAX_SHOTS then
+        charge_shot = charge_shot + 1
+        if charge_shot == SHOT_RECHARGE_TICKS then
+            charge_shot = 0
+            shots = shots + 1
+            sounds["block.anvil.place"]:pos(client.getCameraPos()):volume(0.1):pitch(2.5 + shots / MAX_SHOTS / 2)
+                :subtitle("Gained ammo"):play()
+        end
+    end
+end
+
 local HUD = models:newPart("hud", "HUD")
 
 function events.TICK()
@@ -361,6 +442,12 @@ function events.TICK()
         hud_text = hud_text .. "\n§a[" .. SMOOTH_BRUSH:getKeyName():lower() .. "] §rsmooth brush"
         hud_text = hud_text .. "\n§a[" .. EDIT:getKeyName():lower() .. "] §rexit edit mode"
     else
+        if is_seeker then
+            if is_aiming then
+                hud_text = hud_text .. "§a[" .. FIRE_GUN:getKeyName():lower() .. "] §rfire gun\n"
+            end
+            hud_text = hud_text .. "§a[" .. AIM_GUN:getKeyName():lower() .. "] §raim gun\n"
+        end
         hud_text = hud_text .. "§a[" .. EDIT:getKeyName():lower() .. "] §redit mode"
     end
 
@@ -377,6 +464,13 @@ function events.TICK()
             end
         end
         local seeker_text = ("§a%i §7%s\n"):format(n_hiders, n_hiders == 1 and "hider remains" or "hiders remain")
+        for i = 1, MAX_SHOTS do
+            if i > shots then
+                seeker_text = seeker_text .. " §7:spinner_dark: "
+            else
+                seeker_text = seeker_text .. " :gun: "
+            end
+        end
         HUD:newText("seeker")
             :text(seeker_text)
             :outline(true)
@@ -594,6 +688,37 @@ local function switch_user_type(seeker)
 end
 
 switch_user_type(true)
+
+avatar:store("chameleon_hit", function(pos, dir)
+    local ray_start = pos
+    local ray_end = pos + dir * 100
+
+    local any_hit = false
+    for i = 1, #PARTS do
+        local part = PARTS[i]
+        local mat = part:partToWorldMatrix()
+        local part_nbt = get_part_nbt(part:getChildren()[1])
+
+        local piv = vec(table.unpack(part_nbt.piv))
+        local from = vec(table.unpack(part_nbt.f)) - piv
+        local to = vec(table.unpack(part_nbt.t)) - piv
+        local hit, hit_pos, hit_face = raycast_obb(ray_start, ray_end, mat, from, to)
+
+        if hit and hit_pos and hit_face then
+            any_hit = true
+            local uv = oob_to_local_uv(hit_pos, part:partToWorldMatrix(), from, to, hit_face)
+
+            particle_pos[#particle_pos + 1] = hit_pos
+            paint_face(TEXTURE, part[hit_face], uv, vectors.hsvToRGB(math.random(), 1, 1):augmented(1), 2, true)
+        end
+    end
+
+    TEXTURE:update()
+
+    if any_hit then
+        switch_user_type(true)
+    end
+end)
 
 local fetch_poses = {}
 local poses = {}
